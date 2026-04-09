@@ -1,0 +1,48 @@
+Algorithmic determinism (easy, essential)
+Same model + same weights + same decoding strategy = likely identical output.
+Bitwise determinism (harder)
+Same output down to exact floating-point bits across runs on same hardware/software.
+Cross-machine determinism (very hard)
+Same output across different server CPUs/GPUs, drivers, and BLAS implementations.
+
+
+We are doing algorithmic determinism, with some approximations to bitwise determinism.
+
+Algorithmic determinism is achievable within llama.cpp without touching the GGUF at all. The sources of non-determinism at this level are:
+
+temperature > 0 sampling — fix with --temp 0 (greedy decoding)
+Top-p/top-k sampling — disable with --top-p 1.0 --top-k 1
+Thread-level parallelism with non-associative float ops — fix with -t 1 (single thread)
+Batch processing order — fix with --batch-size 1
+
+That alone gets you to ~99% for repeated runs on the same machine. This is almost certainly the right target for your use case, and requires zero model modification.
+
+A modified llama.cpp binary — this is a compiled executable (or set of executables) that runs inference with your determinism flags baked in. It's not a config file; it's a program. When you change something in llama.cpp's source and recompile, you get a new binary that behaves differently.
+A re-quantized GGUF file — a new .gguf file with higher precision on sensitive layers. This is the model file your binary loads.
+A local HTTP API server — llama.cpp ships with llama-server, a built-in OpenAI-compatible REST API. You run it, and anything that speaks the OpenAI API format (Python, curl, LangChain, etc.) can hit it.
+
+1. build frontend, ready for API calls
+2. modify the llama.cpp and GGUP (for a model, thinking DeepSeek R1 at Q4_K_M)
+	a. changed settings for determinism in common/common.h (global server)
+	b. changed settings in CMakeLists.txt (local)
+	c. requantized to Q8_0 from Q4_K_M
+	d.
+3. get a server set up
+4. link (1) and (3)
+
+
+Activating environment
+source .venv/bin/activate
+
+Call flags
+
+./build/bin/llama-server \
+  -m ./models/your-model.gguf \
+  --host 0.0.0.0 \
+  --port 8080 \
+  --temp 0 \
+  --top-p 1.0 \
+  --top-k 1 \
+  --seed 42 \
+  -t 4 \
+  -c 4096
